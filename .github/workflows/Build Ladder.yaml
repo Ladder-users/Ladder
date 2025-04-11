@@ -1,0 +1,67 @@
+name: Build Ladder
+run-name: ${{ github.actor }} Build Ladder with ${{ github.event.inputs.build-type}}
+on: 
+  workflow_dispatch:
+    inputs:
+      build-type:
+        description: '选择版本'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+
+env:
+  VCPKG_DIR: ${{ github.workspace }}/vcpkg
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:    
+      - name: Get Ladder
+        shell: cmd
+        env:
+          CODING_USER: ${{ secrets.CODING_REPO_USER }}
+          CODING_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+          CODING_ADDR: ${{ secrets.CODING_REPO_ADDRESS }}
+          GCM_INTERACTIVE: never
+        run: |
+          git clone https://%CODING_USER%:%CODING_TOKEN%@%CODING_ADDR%
+
+      - name: Restore vcpkg Cache
+        uses: actions/cache@v3
+        id: vcpkg-cache
+        with:
+          path: |
+            ${{ env.VCPKG_DIR }}
+            ./Ladder/vcpkg_installed
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('Ladder/vcpkg.json') }}
+
+      - name: Initialize vcpkg (if no cache)
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git
+          cd vcpkg
+          .\bootstrap-vcpkg.bat -disableMetrics
+        working-directory: ${{ github.workspace }}
+
+      - name: Integrate vcpkg
+        shell: cmd
+        run: .\vcpkg.exe integrate install
+        working-directory: ${{ github.workspace }}/vcpkg
+
+      - name: Build
+        shell: cmd
+        env:
+          VCPKG_ROOT: ${{ env.VCPKG_DIR }}
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x86
+          msbuild ./Ladder/Ladder.sln /p:Configuration=${{ github.event.inputs.build-type}} /p:Platform=x86
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ladder-${{ github.actor }}
+          path: ./Ladder/${{ github.event.inputs.build-type}}/*.dll
